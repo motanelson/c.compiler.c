@@ -117,7 +117,7 @@ void processar_linha(Subrotina* f, const char* linha) {
         sprintf(label_topo, "loop_%d", while_count);
         sprintf(label_fim, "endloop_%d", while_count);
         while_count++;
-
+        trim(var); trim(val);
         sprintf(f->linhas[f->linha_count++], "%s:", label_topo);
         if (strstr(l, "==")) {
             sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
