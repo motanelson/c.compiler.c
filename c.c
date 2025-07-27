@@ -21,6 +21,9 @@ int func_count = 0;
 char chamadas_indefinidas[MAX_FUNCOES][MAX_NOME];
 int chamadas_count = 0;
 
+int if_count = 0;
+int while_count = 0;
+
 void trim(char* s) {
     char* p = s;
     int l = strlen(p);
@@ -30,14 +33,12 @@ void trim(char* s) {
 }
 
 void adicionar_chamada_indefinida(const char* nome) {
-    for (int i = 0; i < func_count; i++) {
-        if (strcmp(funcoes[i].nome, nome) == 0)
-            return;
-    }
-    for (int i = 0; i < chamadas_count; i++) {
-        if (strcmp(chamadas_indefinidas[i], nome) == 0)
-            return;
-    }
+    for (int i = 0; i < func_count; i++)
+        if (strcmp(funcoes[i].nome, nome) == 0) return;
+
+    for (int i = 0; i < chamadas_count; i++)
+        if (strcmp(chamadas_indefinidas[i], nome) == 0) return;
+
     strcpy(chamadas_indefinidas[chamadas_count++], nome);
 }
 
@@ -45,12 +46,14 @@ void processar_linha(Subrotina* f, const char* linha) {
     char l[MAX_LINHA];
     strcpy(l, linha);
     trim(l);
-    if (strstr(l, "call ") == l) {
+
+    if (strncmp(l, "call ", 5) == 0) {
         char* destino = l + 5;
         trim(destino);
         sprintf(f->linhas[f->linha_count++], "call %s", destino);
         adicionar_chamada_indefinida(destino);
-    } else if (strstr(l, "int ") == l) {
+
+    } else if (strncmp(l, "int ", 4) == 0) {
         char* nome = strtok(l + 4, "=");
         char* valor = strtok(NULL, ";");
         if (nome && valor) {
@@ -58,8 +61,9 @@ void processar_linha(Subrotina* f, const char* linha) {
             trim(valor);
             sprintf(f->vars[f->var_count++], "%s_%s: dw %s", nome, f->nome, valor);
         }
-    } else if (strstr(l, "char*") == l || strstr(l, "char *") == l) {
-        char* nome = strtok(l + (l[4] == '*' ? 5 : 6), "=");
+
+    } else if (strstr(l, "char*") || strstr(l, "char *")) {
+        char* nome = strtok(strstr(l, "*") + 1, "=");
         char* valor = strtok(NULL, ";");
         if (nome && valor) {
             trim(nome);
@@ -69,6 +73,70 @@ void processar_linha(Subrotina* f, const char* linha) {
             if (end) *end = '\0';
             sprintf(f->vars[f->var_count++], "%s_%s: db '%s', 0", nome, f->nome, valor);
         }
+
+    } else if (strncmp(l, "return ", 7) == 0) {
+        char* val = l + 7;
+        trim(val);
+        sprintf(f->linhas[f->linha_count++], "mov ax, %s", val);
+        sprintf(f->linhas[f->linha_count++], "ret");
+
+    } else if (strncmp(l, "if (", 4) == 0) {
+        char var[32], op[3], val[32];
+        sscanf(l, "if (%31[^=<>!]=%2[^=<>!]=%31[^)])", var, op, val);
+        char label[32];
+        sprintf(label, "if_end_%d", if_count++);
+        trim(var); trim(val);
+
+        if (strstr(l, "==")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jne %s", label);
+        } else if (strstr(l, "!=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "je %s", label);
+        } else if (strstr(l, ">=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jl %s", label);
+        } else if (strstr(l, "<=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jg %s", label);
+        } else if (strstr(l, ">")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jle %s", label);
+        } else if (strstr(l, "<")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jge %s", label);
+        }
+
+        sprintf(f->linhas[f->linha_count++], "; ... (bloco do if)");
+        sprintf(f->linhas[f->linha_count++], "%s:", label);
+
+    } else if (strncmp(l, "while (", 7) == 0) {
+        char var[32], op[3], val[32];
+        sscanf(l, "while (%31[^=<>!]=%2[^=<>!]=%31[^)])", var, op, val);
+        char label_topo[32], label_fim[32];
+        sprintf(label_topo, "loop_%d", while_count);
+        sprintf(label_fim, "endloop_%d", while_count);
+        while_count++;
+
+        sprintf(f->linhas[f->linha_count++], "%s:", label_topo);
+        if (strstr(l, "==")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jne %s", label_fim);
+        } else if (strstr(l, "!=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "je %s", label_fim);
+        } else if (strstr(l, ">")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jle %s", label_fim);
+        } else if (strstr(l, "<")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jge %s", label_fim);
+        }
+
+        sprintf(f->linhas[f->linha_count++], "; ... (bloco do while)");
+        sprintf(f->linhas[f->linha_count++], "jmp %s", label_topo);
+        sprintf(f->linhas[f->linha_count++], "%s:", label_fim);
+
     } else {
         sprintf(f->linhas[f->linha_count++], "; ignorado: %s", l);
     }
@@ -106,8 +174,8 @@ void processar_codigo(const char* codigo) {
     }
 }
 
-void gravar_saida(const char* ficheiro_saida) {
-    FILE* f = fopen(ficheiro_saida, "w");
+void gravar_saida(const char* nome_saida) {
+    FILE* f = fopen(nome_saida, "w");
     if (!f) {
         perror("Erro ao gravar");
         return;
@@ -117,32 +185,27 @@ void gravar_saida(const char* ficheiro_saida) {
 
     for (int i = 0; i < func_count; i++) {
         fprintf(f, "%s:\n", funcoes[i].nome);
-        for (int j = 0; j < funcoes[i].linha_count; j++) {
+        for (int j = 0; j < funcoes[i].linha_count; j++)
             fprintf(f, "    %s\n", funcoes[i].linhas[j]);
-        }
-        fprintf(f, "    ret\n\n");
+        fprintf(f, "\n");
     }
 
     fprintf(f, "section .data\n\n");
-    for (int i = 0; i < func_count; i++) {
-        for (int j = 0; j < funcoes[i].var_count; j++) {
+    for (int i = 0; i < func_count; i++)
+        for (int j = 0; j < funcoes[i].var_count; j++)
             fprintf(f, "%s\n", funcoes[i].vars[j]);
-        }
-    }
 
     for (int i = 0; i < chamadas_count; i++) {
         int definida = 0;
-        for (int j = 0; j < func_count; j++) {
+        for (int j = 0; j < func_count; j++)
             if (strcmp(funcoes[j].nome, chamadas_indefinidas[i]) == 0)
                 definida = 1;
-        }
-        if (!definida) {
+        if (!definida)
             fprintf(f, "%s:\n    ; chamada indefinida\n    ret\n\n", chamadas_indefinidas[i]);
-        }
     }
 
     fclose(f);
-    printf("Compilação concluída: %s\n", ficheiro_saida);
+    printf("Compilação concluída: %s\n", nome_saida);
 }
 
 int main() {
@@ -177,4 +240,3 @@ int main() {
     free(buffer);
     return 0;
 }
-

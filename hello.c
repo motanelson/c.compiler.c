@@ -1,9 +1,12 @@
 void main() {
-    int a = 100;
-    char *msg = "hello";
-    call print_hello;
-}
+    int a = 5;
+    call mostrar;
 
-void print_hello() {
-    call nothing;
+    if (a == 5)
+        call igual;
+
+    while (a != 0)
+        call loop;
+
+    return 1;
 }
