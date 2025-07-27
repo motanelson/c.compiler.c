@@ -1,12 +1,16 @@
-void main() {
-    int a = 5;
-    call mostrar;
+int a = 0;
+int b = 0;
 
-    if (a == 5)
-        call igual;
+void somar() {
+    a = a + b;
+}
 
-    while (a != 0)
-        call loop;
+void subtrair() {
+    a--;
+}
 
-    return 1;
+int main() {
+    somar();
+    subtrair();
+    return a;
 }
