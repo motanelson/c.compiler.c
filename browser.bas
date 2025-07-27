@@ -4,6 +4,9 @@ Dim As Integer inBody = 0, inScript = 0
 Dim As Integer i, j, ch, insideTag = 0
 Dim As String hrefText
 Dim As String filename
+Color 0, 14
+Cls
+
 
 ' Perguntar o nome do ficheiro
 Input "Nome do ficheiro HTML a ler: ", filename
@@ -12,9 +15,6 @@ If Open(filename For Input As #f) <> 0 Then
     Print "Erro ao abrir o ficheiro!"
     End
 End If
-
-Color 0, 14
-Cls
 
 Do Until Eof(f)
     Line Input #f, buffer
