@@ -82,7 +82,7 @@ void processar_linha(Subrotina* f, const char* linha) {
 
     } else if (strncmp(l, "if (", 4) == 0) {
         char var[32], op[3], val[32];
-        sscanf(l, "if (%31[^=<>!] %2[^=<>!] %31[^)])", var, op, val);
+        sscanf(l, "if (%31[^=<>!] %2[=!<>] %31[^)]", var, op, val);
         char label[32];
         sprintf(label, "if_end_%d", if_count++);
         trim(var); trim(val);
@@ -112,7 +112,7 @@ void processar_linha(Subrotina* f, const char* linha) {
 
     } else if (strncmp(l, "while (", 7) == 0) {
         char var[32], op[3], val[32];
-        sscanf(l, "while (%31[^=<>!] %2[^=<>!]%31[^)])", var, op, val);
+        sscanf(l, "while (%31[^=<>!] %2[=!<>] %31[^)]", var, op, val);
         char label_topo[32], label_fim[32];
         sprintf(label_topo, "loop_%d", while_count);
         sprintf(label_fim, "endloop_%d", while_count);
@@ -210,7 +210,7 @@ void gravar_saida(const char* nome_saida) {
 
 int main() {
     char nome[256];
-    printf("Nome do ficheiro C (.c): ");
+    printf("\033c\033[43;30m\nNome do ficheiro C (.c): ");
     scanf("%s", nome);
 
     FILE* f = fopen(nome, "r");
