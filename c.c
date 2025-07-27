@@ -3,156 +3,240 @@
 #include <string.h>
 #include <ctype.h>
 
-#define MAX_FUNCOES 128
-#define MAX_LINHAS 128
+#define MAX_FUNCOES 100
+#define MAX_LINHAS 1000
 #define MAX_NOME 64
-#define MAX_CODIGO 128
+#define MAX_LINHA 512
 
 typedef struct {
     char nome[MAX_NOME];
-    char linhas[MAX_LINHAS][MAX_CODIGO];
-    int total;
-} Funcao;
+    char linhas[MAX_LINHAS][MAX_LINHA];
+    int linha_count;
+    char vars[MAX_LINHAS][MAX_LINHA];
+    int var_count;
+} Subrotina;
 
-Funcao funcoes[MAX_FUNCOES];
-int total_funcoes = 0;
+Subrotina funcoes[MAX_FUNCOES];
+int func_count = 0;
+char chamadas_indefinidas[MAX_FUNCOES][MAX_NOME];
+int chamadas_count = 0;
 
-char* trim(char* str) {
-    while (isspace(*str)) str++;
-    if (*str == 0) return str;
-    char* end = str + strlen(str) - 1;
-    while (end > str && isspace(*end)) end--;
-    *(end + 1) = 0;
-    return str;
+int if_count = 0;
+int while_count = 0;
+
+void trim(char* s) {
+    char* p = s;
+    int l = strlen(p);
+    while (isspace(p[l - 1])) p[--l] = 0;
+    while (*p && isspace(*p)) ++p, --l;
+    memmove(s, p, l + 1);
 }
 
-Funcao* encontra_ou_cria_funcao(const char* nome) {
-    for (int i = 0; i < total_funcoes; i++) {
-        if (strcmp(funcoes[i].nome, nome) == 0) return &funcoes[i];
-    }
-    strcpy(funcoes[total_funcoes].nome, nome);
-    funcoes[total_funcoes].total = 0;
-    return &funcoes[total_funcoes++];
+void adicionar_chamada_indefinida(const char* nome) {
+    for (int i = 0; i < func_count; i++)
+        if (strcmp(funcoes[i].nome, nome) == 0) return;
+
+    for (int i = 0; i < chamadas_count; i++)
+        if (strcmp(chamadas_indefinidas[i], nome) == 0) return;
+
+    strcpy(chamadas_indefinidas[chamadas_count++], nome);
 }
 
-void adiciona_codigo(const char* nome, const char* linha) {
-    Funcao* f = encontra_ou_cria_funcao(nome);
-    if (f->total < MAX_LINHAS) {
-        strncpy(f->linhas[f->total++], linha, MAX_CODIGO - 1);
-    }
-}
+void processar_linha(Subrotina* f, const char* linha) {
+    char l[MAX_LINHA];
+    strcpy(l, linha);
+    trim(l);
 
-int eh_declaracao_global(char* linha, char* nome_var) {
-    if (strncmp(linha, "int ", 4) == 0 && strchr(linha, '=')) {
-        sscanf(linha, "int %s", nome_var);
-        char* igual = strchr(nome_var, '=');
-        if (igual) *igual = '\0';
-        char* p = nome_var;
-        while (*p) {
-            if (*p == ';') *p = '\0';
-            p++;
+    if (strncmp(l, "call ", 5) == 0) {
+        char* destino = l + 5;
+        trim(destino);
+        sprintf(f->linhas[f->linha_count++], "call %s", destino);
+        adicionar_chamada_indefinida(destino);
+
+    } else if (strncmp(l, "int ", 4) == 0) {
+        char* nome = strtok(l + 4, "=");
+        char* valor = strtok(NULL, ";");
+        if (nome && valor) {
+            trim(nome);
+            trim(valor);
+            sprintf(f->vars[f->var_count++], "%s_%s: dw %s", nome, f->nome, valor);
         }
-        return 1;
+
+    } else if (strstr(l, "char*") || strstr(l, "char *")) {
+        char* nome = strtok(strstr(l, "*") + 1, "=");
+        char* valor = strtok(NULL, ";");
+        if (nome && valor) {
+            trim(nome);
+            trim(valor);
+            if (valor[0] == '"') valor++;
+            char* end = strchr(valor, '"');
+            if (end) *end = '\0';
+            sprintf(f->vars[f->var_count++], "%s_%s: db '%s', 0", nome, f->nome, valor);
+        }
+
+    } else if (strncmp(l, "return ", 7) == 0) {
+        char* val = l + 7;
+        trim(val);
+        sprintf(f->linhas[f->linha_count++], "mov ax, %s", val);
+        sprintf(f->linhas[f->linha_count++], "ret");
+
+    } else if (strncmp(l, "if (", 4) == 0) {
+        char var[32], op[3], val[32];
+        sscanf(l, "if (%31[^=<>!] %2[^=<>!] %31[^)])", var, op, val);
+        char label[32];
+        sprintf(label, "if_end_%d", if_count++);
+        trim(var); trim(val);
+
+        if (strstr(l, "==")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jne %s", label);
+        } else if (strstr(l, "!=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "je %s", label);
+        } else if (strstr(l, ">=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jl %s", label);
+        } else if (strstr(l, "<=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jg %s", label);
+        } else if (strstr(l, ">")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jle %s", label);
+        } else if (strstr(l, "<")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jge %s", label);
+        }
+
+        sprintf(f->linhas[f->linha_count++], "; ... (bloco do if)");
+        sprintf(f->linhas[f->linha_count++], "%s:", label);
+
+    } else if (strncmp(l, "while (", 7) == 0) {
+        char var[32], op[3], val[32];
+        sscanf(l, "while (%31[^=<>!] %2[^=<>!]%31[^)])", var, op, val);
+        char label_topo[32], label_fim[32];
+        sprintf(label_topo, "loop_%d", while_count);
+        sprintf(label_fim, "endloop_%d", while_count);
+        while_count++;
+
+        sprintf(f->linhas[f->linha_count++], "%s:", label_topo);
+        if (strstr(l, "==")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jne %s", label_fim);
+        } else if (strstr(l, "!=")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "je %s", label_fim);
+        } else if (strstr(l, ">")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jle %s", label_fim);
+        } else if (strstr(l, "<")) {
+            sprintf(f->linhas[f->linha_count++], "cmp %s_%s, %s", var, f->nome, val);
+            sprintf(f->linhas[f->linha_count++], "jge %s", label_fim);
+        }
+
+        sprintf(f->linhas[f->linha_count++], "; ... (bloco do while)");
+        sprintf(f->linhas[f->linha_count++], "jmp %s", label_topo);
+        sprintf(f->linhas[f->linha_count++], "%s:", label_fim);
+
+    } else {
+        sprintf(f->linhas[f->linha_count++], "; ignorado: %s", l);
     }
-    return 0;
 }
 
-void processa_linha(char* funcao, char* linha) {
-    linha = trim(linha);
+void processar_codigo(const char* codigo) {
+    const char* p = codigo;
+    while ((p = strstr(p, "void ")) != NULL) {
+        p += 5;
+        char nome[MAX_NOME] = {0};
+        sscanf(p, "%s", nome);
+        char* abre = strchr(p, '{');
+        if (!abre) break;
+        abre++;
+        char* fecha = strchr(abre, '}');
+        if (!fecha) break;
 
-    if (strstr(linha, "a = a + b")) {
-        adiciona_codigo(funcao, "    mov ax, [a]");
-        adiciona_codigo(funcao, "    add ax, [b]");
-        adiciona_codigo(funcao, "    mov [a], ax");
-    }
-    else if (strstr(linha, "a--")) {
-        adiciona_codigo(funcao, "    mov ax, [a]");
-        adiciona_codigo(funcao, "    dec ax");
-        adiciona_codigo(funcao, "    mov [a], ax");
-    }
-    else if (strstr(linha, "return a")) {
-        adiciona_codigo(funcao, "    mov ax, [a]");
-        adiciona_codigo(funcao, "    ret");
-    }
-    else if (strstr(linha, "return")) {
-        adiciona_codigo(funcao, "    ret");
-    }
-    else if (strchr(linha, '(') && strchr(linha, ')') && strstr(linha, ";")) {
-        char chamada[64] = {0};
-        sscanf(linha, "%[^(); \t]", chamada);
-        char* p = chamada;
-        while (*p && !isalpha(*p)) p++;
-        if (*p) {
-            char instrucao[128];
-            snprintf(instrucao, sizeof(instrucao), "    call %s", p);
-            adiciona_codigo(funcao, instrucao);
+        Subrotina* f = &funcoes[func_count++];
+        strcpy(f->nome, nome);
+        f->linha_count = 0;
+        f->var_count = 0;
+
+        char buffer[MAX_LINHA];
+        const char* linha = abre;
+        while (linha < fecha) {
+            const char* prox = strchr(linha, '\n');
+            int len = prox ? (prox - linha) : strlen(linha);
+            strncpy(buffer, linha, len);
+            buffer[len] = '\0';
+            processar_linha(f, buffer);
+            if (!prox) break;
+            linha = prox + 1;
         }
+        p = fecha + 1;
     }
+}
+
+void gravar_saida(const char* nome_saida) {
+    FILE* f = fopen(nome_saida, "w");
+    if (!f) {
+        perror("Erro ao gravar");
+        return;
+    }
+
+    fprintf(f, "; Código Assembly 16-bit (NASM)\n\nsection .text\n\n");
+
+    for (int i = 0; i < func_count; i++) {
+        fprintf(f, "%s:\n", funcoes[i].nome);
+        for (int j = 0; j < funcoes[i].linha_count; j++)
+            fprintf(f, "    %s\n", funcoes[i].linhas[j]);
+        fprintf(f, "\n");
+    }
+
+    fprintf(f, "section .data\n\n");
+    for (int i = 0; i < func_count; i++)
+        for (int j = 0; j < funcoes[i].var_count; j++)
+            fprintf(f, "%s\n", funcoes[i].vars[j]);
+
+    for (int i = 0; i < chamadas_count; i++) {
+        int definida = 0;
+        for (int j = 0; j < func_count; j++)
+            if (strcmp(funcoes[j].nome, chamadas_indefinidas[i]) == 0)
+                definida = 1;
+        if (!definida)
+            fprintf(f, "%s:\n    ; chamada indefinida\n    ret\n\n", chamadas_indefinidas[i]);
+    }
+
+    fclose(f);
+    printf("Compilação concluída: %s\n", nome_saida);
 }
 
 int main() {
-    char nome_entrada[128], nome_saida[128];
-    printf("Nome do ficheiro C: ");
-    fgets(nome_entrada, 128, stdin);
-    nome_entrada[strcspn(nome_entrada, "\n")] = 0;
+    char nome[256];
+    printf("Nome do ficheiro C (.c): ");
+    scanf("%s", nome);
 
-    FILE* in = fopen(nome_entrada, "r");
-    if (!in) {
-        perror("Erro ao abrir");
+    FILE* f = fopen(nome, "r");
+    if (!f) {
+        perror("Erro ao abrir o ficheiro");
         return 1;
     }
 
-    snprintf(nome_saida, sizeof(nome_saida), "%s", nome_entrada);
-    char* ponto = strrchr(nome_saida, '.');
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    rewind(f);
+
+    char* buffer = (char*)malloc(size + 1);
+    fread(buffer, 1, size, f);
+    buffer[size] = '\0';
+    fclose(f);
+
+    processar_codigo(buffer);
+
+    char saida[256];
+    strcpy(saida, nome);
+    char* ponto = strrchr(saida, '.');
     if (ponto) strcpy(ponto, ".S");
-    else strcat(nome_saida, ".S");
+    else strcat(saida, ".S");
 
-    char linha[256];
-    char contexto[MAX_NOME] = "global";
-    char var_nome[64];
-    char globais[128][64];
-    int total_globais = 0;
-
-    while (fgets(linha, sizeof(linha), in)) {
-        if (eh_declaracao_global(linha, var_nome)) {
-            strcpy(globais[total_globais++], var_nome);
-            continue;
-        }
-
-        if (strstr(linha, "void ") || strstr(linha, "int ")) {
-            if (strchr(linha, '(') && strchr(linha, ')') && strchr(linha, '{')) {
-                sscanf(linha, "%*s %[^ (]", contexto);
-                continue;
-            }
-        }
-
-        if (strchr(linha, '{') || strchr(linha, '}')) continue;
-        processa_linha(contexto, linha);
-    }
-
-    fclose(in);
-
-    FILE* out = fopen(nome_saida, "w");
-    if (!out) {
-        perror("Erro ao criar saída");
-        return 1;
-    }
-
-    fprintf(out, "[global main]\n\nsection .data\n");
-    for (int i = 0; i < total_globais; i++) {
-        fprintf(out, "%s dw 0\n", globais[i]);
-    }
-
-    fprintf(out, "\nsection .text\n");
-    for (int i = 0; i < total_funcoes; i++) {
-        fprintf(out, "%s:\n", funcoes[i].nome);
-        for (int j = 0; j < funcoes[i].total; j++) {
-            fprintf(out, "%s\n", funcoes[i].linhas[j]);
-        }
-        fprintf(out, "\n");
-    }
-
-    fclose(out);
-    printf("Compilado para: %s\n", nome_saida);
+    gravar_saida(saida);
+    free(buffer);
     return 0;
 }
