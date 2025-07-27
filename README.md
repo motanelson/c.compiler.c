@@ -1,2 +1,1 @@
-# web.browser.bas
-freebasic console browser
+gcc code c compile to asm
