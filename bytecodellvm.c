@@ -85,6 +85,7 @@ void gerar_llvm(const char *input_filename, const char *output_filename) {
 
 int main() {
     char input[256], output[256];
+    printf("\033c\033[43;30m\n");
     printf("Ficheiro C de entrada: ");
     scanf("%s", input);
     sprintf(output, "%.*s.ll", (int)(strlen(input) - 2), input);
